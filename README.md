@@ -1,5 +1,5 @@
 **NuyoRican Food Truck**
-    - A full-stack web application built for The NuyoRican Food Truck, designed to replace their preset GoDaddy site with a modern, functional, and dynamic web experience.
+- A full-stack web application built for The NuyoRican Food Truck, designed to replace their preset GoDaddy site with a modern, functional, and dynamic web experience.
 
 **Overview**
     - This project was developed for a client who wanted a more flexible and interactive website for their food truck business.
