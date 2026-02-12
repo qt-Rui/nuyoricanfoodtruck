@@ -16,30 +16,38 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
 
+        const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+        const adminPassword = process.env.ADMIN_PASSWORD;
+        if (!adminEmail || !adminPassword) return null;
+
         const email = String(credentials.email).trim().toLowerCase();
         const password = String(credentials.password);
 
-        // Check if this is the admin email from env
-        if (email === process.env.ADMIN_EMAIL?.toLowerCase()) {
-          let admin = await prisma.user.findUnique({ where: { email } });
-
-          // If admin doesn't exist, create it with hashed password
-          if (!admin) {
-            const hashedPassword = await bcrypt.hash(
-              process.env.ADMIN_PASSWORD!,
-              10
-            );
-            admin = await prisma.user.create({
-              data: { email, name: "Admin", password: hashedPassword },
-            });
-          }
-
-          // Compare given password with stored hashed one
-          const isValid = await bcrypt.compare(password, admin.password ?? "");
-          if (isValid) return admin;
+        if (email !== adminEmail || password !== adminPassword) {
+          return null;
         }
 
-        return null;
+        let admin = await prisma.user.findUnique({ where: { email: adminEmail } });
+        const hashedPassword = await bcrypt.hash(adminPassword, 10);
+
+        if (!admin) {
+          admin = await prisma.user.create({
+            data: { email: adminEmail, name: "Admin", password: hashedPassword },
+          });
+          return admin;
+        }
+
+        const storedMatchesEnv =
+          !!admin.password && (await bcrypt.compare(adminPassword, admin.password));
+
+        if (!storedMatchesEnv) {
+          admin = await prisma.user.update({
+            where: { id: admin.id },
+            data: { password: hashedPassword, email: adminEmail },
+          });
+        }
+
+        return admin;
       },
     }),
   ],
