@@ -1,10 +1,16 @@
 export const runtime = "nodejs";
 import { prisma } from "../../../../../lib/prisma";
+import { auth } from "../../../../../auth";
 import { NextResponse } from "next/server";
 
 // DELETE a food item
 export async function DELETE(_: Request, context: { params: Promise<{ id: string }> }) {
   try {
+    const session = await auth();
+    if (!session?.user) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
+
     const { id } = await context.params;
     await prisma.food.delete({ where: { id } });
     return NextResponse.json({ message: "Deleted" });
@@ -17,13 +23,34 @@ export async function DELETE(_: Request, context: { params: Promise<{ id: string
 // UPDATE a food item
 export async function PUT(req: Request, context: { params: Promise<{ id: string }> }) {
   try {
+    const session = await auth();
+    if (!session?.user) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
+
     const { id } = await context.params;
     const data = await req.json();
     const { name, price, description, isOnTruck, isForCatering, imageUrl } = data;
+    const cleanedName = String(name ?? "").trim();
+
+    const parsedPrice = Number(price);
+    if (!Number.isFinite(parsedPrice)) {
+      return NextResponse.json({ error: "Invalid price" }, { status: 400 });
+    }
+    if (!cleanedName) {
+      return NextResponse.json({ error: "Name is required" }, { status: 400 });
+    }
 
     const updated = await prisma.food.update({
       where: { id },
-      data: { name, price, description, isOnTruck, isForCatering, imageUrl },
+      data: {
+        name: cleanedName,
+        price: parsedPrice,
+        description: description ? String(description) : null,
+        isOnTruck: Boolean(isOnTruck),
+        isForCatering: Boolean(isForCatering),
+        imageUrl: imageUrl ? String(imageUrl) : null,
+      },
     });
 
     return NextResponse.json(updated);

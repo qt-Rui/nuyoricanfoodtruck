@@ -1,12 +1,25 @@
-// middleware.js
 import { auth } from "./auth";
+import { NextResponse } from "next/server";
 
 export default auth((req) => {
-  // Optional: Add public routes that don't require auth
-  const publicPaths = ['/api/auth/', '/auth/signin', '/'];
-  
-  if (publicPaths.some(path => req.nextUrl.pathname.startsWith(path))) {
+  const { pathname } = req.nextUrl;
+  const isPublicPath =
+    pathname === "/" ||
+    pathname.startsWith("/auth/signin") ||
+    pathname.startsWith("/api/auth/");
+
+  if (isPublicPath) {
     return;
+  }
+
+  if (!req.auth) {
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
+
+    const signInUrl = new URL("/auth/signin", req.url);
+    signInUrl.searchParams.set("callbackUrl", pathname);
+    return NextResponse.redirect(signInUrl);
   }
 });
 
@@ -21,5 +34,5 @@ export const config = {
      */
     '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
-  runtime: 'nodejs', // Force Node.js runtime
+  runtime: "nodejs", // Force Node.js runtime
 };

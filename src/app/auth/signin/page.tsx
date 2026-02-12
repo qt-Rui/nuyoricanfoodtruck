@@ -11,13 +11,22 @@ export default function SignInPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [callbackUrl, setCallbackUrl] = useState("/admin");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const value = new URLSearchParams(window.location.search).get("callbackUrl");
+    if (value?.startsWith("/")) {
+      setCallbackUrl(value);
+    }
+  }, []);
 
   // Redirect if already authenticated
   useEffect(() => {
     if (session) {
-      router.push("/admin");
+      router.push(callbackUrl);
     }
-  }, [session, router]);
+  }, [session, router, callbackUrl]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,10 +43,11 @@ export default function SignInPage() {
       if (result?.error) {
         setError("Invalid email or password");
       } else {
-        router.push("/admin");
+        router.push(callbackUrl);
       }
     } catch (error) {
-      setError(`An error occurred during sign in ${error}`);
+      console.error("Sign in error:", error);
+      setError("An error occurred during sign in.");
     } finally {
       setIsLoading(false);
     }
@@ -46,8 +56,8 @@ export default function SignInPage() {
   // Show loading while checking session
   if (status === "loading") {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-100">
-        <div className="bg-white p-8 rounded-lg shadow-lg w-80 text-center">
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-slate-50 to-white px-6">
+        <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-lg">
           <p>Loading...</p>
         </div>
       </div>
@@ -60,15 +70,20 @@ export default function SignInPage() {
   }
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gray-100">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-slate-50 to-white px-6">
       <form
         onSubmit={handleSubmit}
-        className="bg-white p-8 rounded-lg shadow-lg w-80"
+        className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-8 shadow-lg"
       >
-        <h1 className="text-xl font-semibold mb-4 text-center">Admin Login</h1>
+        <h1 className="mb-2 text-center text-2xl font-bold text-slate-900">Admin Login</h1>
+        <p className="mb-5 text-center text-sm text-slate-600">
+          Sign in to manage menu items and site settings.
+        </p>
 
         {error && (
-          <p className="text-red-500 text-sm mb-2 text-center">{error}</p>
+          <p className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-center text-sm text-red-700">
+            {error}
+          </p>
         )}
 
         <input
@@ -76,7 +91,7 @@ export default function SignInPage() {
           placeholder="Email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="border border-gray-300 p-2 w-full mb-3 rounded"
+          className="mb-3 w-full rounded-lg border border-slate-300 p-2.5 outline-none focus:ring-2 focus:ring-blue-200"
           required
         />
 
@@ -85,14 +100,14 @@ export default function SignInPage() {
           placeholder="Password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="border border-gray-300 p-2 w-full mb-4 rounded"
+          className="mb-4 w-full rounded-lg border border-slate-300 p-2.5 outline-none focus:ring-2 focus:ring-blue-200"
           required
         />
 
         <button
           type="submit"
           disabled={isLoading}
-          className="bg-blue-500 text-white p-2 w-full rounded hover:bg-blue-600 disabled:opacity-50"
+          className="w-full rounded-xl bg-blue-700 p-2.5 font-semibold text-white transition hover:bg-blue-800 disabled:opacity-50"
         >
           {isLoading ? "Signing In..." : "Sign In"}
         </button>

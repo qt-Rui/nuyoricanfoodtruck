@@ -4,7 +4,7 @@ import { auth } from "../../../../auth";
 import { NextResponse } from "next/server";
 
 export async function GET() {
-  const foods = await prisma.food.findMany();
+  const foods = await prisma.food.findMany({ orderBy: { createdAt: "desc" } });
   return NextResponse.json(foods);
 }
 
@@ -15,6 +15,25 @@ export async function POST(req: Request) {
   }  
 
   const data = await req.json();
-  const food = await prisma.food.create({ data });
+
+  const name = String(data?.name ?? "").trim();
+  const price = Number(data?.price);
+  if (!name) {
+    return NextResponse.json({ error: "Name is required" }, { status: 400 });
+  }
+  if (!Number.isFinite(price)) {
+    return NextResponse.json({ error: "Invalid price" }, { status: 400 });
+  }
+
+  const food = await prisma.food.create({
+    data: {
+      name,
+      price,
+      description: data?.description ? String(data.description) : null,
+      isOnTruck: Boolean(data?.isOnTruck),
+      isForCatering: Boolean(data?.isForCatering),
+      imageUrl: data?.imageUrl ? String(data.imageUrl) : null,
+    },
+  });
   return NextResponse.json(food);
 }

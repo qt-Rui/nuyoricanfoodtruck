@@ -11,10 +11,19 @@ interface Food {
   id: string;
   name: string;
   price: number;
-  description?: string;
+  description: string | null;
   isOnTruck: boolean;
   isForCatering: boolean;
-  imageUrl?: string;
+  imageUrl: string | null;
+}
+
+interface FoodForm {
+  name: string;
+  price: string;
+  description: string;
+  isOnTruck: boolean;
+  isForCatering: boolean;
+  imageUrl: string;
 }
 
 interface SiteSettings {
@@ -23,30 +32,35 @@ interface SiteSettings {
   doorDashUrl: string;
 }
 
+const emptyFoodForm: FoodForm = {
+  name: "",
+  price: "",
+  description: "",
+  isOnTruck: false,
+  isForCatering: false,
+  imageUrl: "",
+};
+
 export default function AdminPage() {
   const [foods, setFoods] = useState<Food[]>([]);
+  const [foodForm, setFoodForm] = useState<FoodForm>(emptyFoodForm);
+  const [editingFoodId, setEditingFoodId] = useState<string | null>(null);
   const [siteSettings, setSiteSettings] = useState<SiteSettings>({
     openDate: "",
     openHours: "",
     doorDashUrl: "",
   });
-  const [newFood, setNewFood] = useState({
-    name: "",
-    price: "",
-    description: "",
-    isOnTruck: false,
-    isForCatering: false,
-    imageUrl: "",
-  });
-  const [editingFood, setEditingFood] = useState<Food | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSavingFood, setIsSavingFood] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [foodMessage, setFoodMessage] = useState("");
   const [settingsMessage, setSettingsMessage] = useState("");
   const [query, setQuery] = useState("");
+  const [selectedFileName, setSelectedFileName] = useState("");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { data: session, status } = useSession();
   const router = useRouter();
 
-  // Redirect if not authenticated
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/auth/signin");
@@ -58,7 +72,7 @@ export default function AdminPage() {
       const res = await fetch("/api/foods");
       if (res.ok) {
         const data = await res.json();
-        setFoods(data);
+        setFoods(Array.isArray(data) ? data : []);
       }
     } catch (error) {
       console.error("Failed to fetch foods:", error);
@@ -91,9 +105,96 @@ export default function AdminPage() {
     }
   }, [status]);
 
-  const filteredFoods = foods.filter((f) =>
-    `${f.name} ${f.description ?? ""}`.toLowerCase().includes(query.toLowerCase())
-  );
+  const resetFoodForm = () => {
+    setFoodForm(emptyFoodForm);
+    setEditingFoodId(null);
+    setSelectedFileName("");
+  };
+
+  const startEditingFood = (food: Food) => {
+    setEditingFoodId(food.id);
+    setFoodForm({
+      name: food.name,
+      price: String(food.price),
+      description: food.description ?? "",
+      isOnTruck: food.isOnTruck,
+      isForCatering: food.isForCatering,
+      imageUrl: food.imageUrl ?? "",
+    });
+    setSelectedFileName("");
+    setFoodMessage("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const handleSaveFood = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFoodMessage("");
+
+    const parsedPrice = Number(foodForm.price);
+    if (!foodForm.name.trim()) {
+      setFoodMessage("Name is required.");
+      return;
+    }
+    if (!Number.isFinite(parsedPrice)) {
+      setFoodMessage("Please enter a valid price.");
+      return;
+    }
+
+    setIsSavingFood(true);
+
+    try {
+      const endpoint = editingFoodId
+        ? `/api/foods/${editingFoodId}`
+        : "/api/foods";
+      const method = editingFoodId ? "PUT" : "POST";
+
+      const res = await fetch(endpoint, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...foodForm,
+          name: foodForm.name.trim(),
+          price: parsedPrice,
+          description: foodForm.description.trim() || null,
+          imageUrl: foodForm.imageUrl.trim() || null,
+        }),
+      });
+
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        setFoodMessage(payload.error || payload.message || "Failed to save item.");
+        return;
+      }
+
+      setFoodMessage(editingFoodId ? "Item updated." : "Item added.");
+      resetFoodForm();
+      await fetchFoods();
+    } catch (error) {
+      console.error("Failed to save food:", error);
+      setFoodMessage("Could not save item. Please try again.");
+    } finally {
+      setIsSavingFood(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this menu item?")) return;
+
+    try {
+      const res = await fetch(`/api/foods/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        setFoodMessage("Could not delete item.");
+        return;
+      }
+      if (editingFoodId === id) {
+        resetFoodForm();
+      }
+      await fetchFoods();
+    } catch (error) {
+      console.error("Failed to delete food:", error);
+      setFoodMessage("Could not delete item.");
+    }
+  };
 
   const handleSaveSiteSettings = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -126,56 +227,6 @@ export default function AdminPage() {
     }
   };
 
-  const handleAddFood = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      await fetch("/api/foods", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...newFood,
-          price: parseFloat(newFood.price),
-        }),
-      });
-      setNewFood({
-        name: "",
-        price: "",
-        description: "",
-        isOnTruck: false,
-        isForCatering: false,
-        imageUrl: "",
-      });
-      fetchFoods();
-    } catch (error) {
-      console.error("Failed to add food:", error);
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this item?")) return;
-    try {
-      await fetch(`/api/foods/${id}`, { method: "DELETE" });
-      fetchFoods();
-    } catch (error) {
-      console.error("Failed to delete food:", error);
-    }
-  };
-
-  /* const handleUpdate = async (food: Food) => {
-    try {
-      await fetch(`/api/foods/${food.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(food),
-      });
-      setEditingFood(null);
-      fetchFoods();
-    } catch (error) {
-      console.error("Failed to update food:", error);
-    }
-  };*/
-
-  // Upload image to Cloudinary via API route
   const handleImageUpload = async (file: File) => {
     if (!file) return;
 
@@ -187,333 +238,361 @@ export default function AdminPage() {
         method: "POST",
         body: formData,
       });
-
       const data = await res.json();
 
-      if (data.secure_url) {
-        setNewFood((prev) => ({ ...prev, imageUrl: data.secure_url }));
-        alert("Image uploaded successfully!");
+      if (res.ok && data.secure_url) {
+        setFoodForm((prev) => ({ ...prev, imageUrl: data.secure_url }));
+        setFoodMessage("Image uploaded.");
       } else {
-        alert("Failed to upload image.");
+        setFoodMessage("Image upload failed.");
       }
-    } catch (err) {
-      console.error("Error uploading image:", err);
-      alert("Error uploading image.");
+    } catch (error) {
+      console.error("Error uploading image:", error);
+      setFoodMessage("Image upload failed.");
     }
   };
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [selectedFileName, setSelectedFileName] = useState<string>("");
-
+  const filteredFoods = foods.filter((food) =>
+    `${food.name} ${food.description ?? ""}`
+      .toLowerCase()
+      .includes(query.trim().toLowerCase())
+  );
 
   if (status === "loading" || isLoading) {
-    return (
-      <div className="p-8 text-center text-gray-600">Loading...</div>
-    );
+    return <div className="p-8 text-center text-gray-600">Loading...</div>;
   }
 
   if (!session) return null;
 
   return (
-    <div className="p-6 md:p-10 max-w-7xl mx-auto relative">
-      {/* Top-Centered View Website Button */}
-      <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10">
-        <a
-          href="/"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="bg-sky-600 text-white px-6 py-2 rounded-full font-medium shadow-md hover:bg-sky-700 transition"
-        >
-          View Website
-        </a>
-      </div>
-
-      {/* Header */}
-      <header className="flex flex-col md:flex-row md:items-center md:justify-between mb-8 gap-4 mt-12">
-        <div>
-          <h1 className="text-3xl font-extrabold">Admin Dashboard</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Manage menu items, pricing, and availability.
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="text-sm text-gray-700">{session.user?.email}</div>
-          <button
-            onClick={() => signOut({ callbackUrl: "/auth/signin" })}
-            className="bg-red-600 text-white px-3 py-2 rounded hover:bg-red-700 transition"
-          >
-            Logout
-          </button>
-        </div>
-      </header>
-
-      <section className="mb-6 bg-white border rounded-lg shadow-sm p-6">
-        <h2 className="text-lg font-semibold">Business Hours & DoorDash</h2>
-        <p className="text-sm text-gray-500 mt-1">
-          These values are shown on the website homepage.
-        </p>
-
-        <form onSubmit={handleSaveSiteSettings} className="mt-4 grid md:grid-cols-3 gap-4">
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
+      <div className="max-w-7xl mx-auto p-6 md:p-10">
+        <header className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <label className="block text-sm text-gray-600">Open Date(s)</label>
-            <input
-              value={siteSettings.openDate}
-              onChange={(e) =>
-                setSiteSettings((prev) => ({ ...prev, openDate: e.target.value }))
-              }
-              placeholder="Friday - Sunday"
-              className="mt-1 w-full border rounded px-3 py-2"
-              required
-            />
+            <h1 className="text-3xl font-extrabold text-slate-900">Admin Dashboard</h1>
+            <p className="text-sm text-slate-600">
+              Manage menu items, hours, and links shown on the website.
+            </p>
           </div>
 
-          <div>
-            <label className="block text-sm text-gray-600">Open Time(s)</label>
-            <input
-              value={siteSettings.openHours}
-              onChange={(e) =>
-                setSiteSettings((prev) => ({ ...prev, openHours: e.target.value }))
-              }
-              placeholder="11:00 AM - 8:00 PM"
-              className="mt-1 w-full border rounded px-3 py-2"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm text-gray-600">DoorDash URL</label>
-            <input
-              type="url"
-              value={siteSettings.doorDashUrl}
-              onChange={(e) =>
-                setSiteSettings((prev) => ({ ...prev, doorDashUrl: e.target.value }))
-              }
-              placeholder="https://www.doordash.com/"
-              className="mt-1 w-full border rounded px-3 py-2"
-              required
-            />
-          </div>
-
-          <div className="md:col-span-3 flex items-center gap-3">
-            <button
-              type="submit"
-              disabled={isSavingSettings}
-              className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition disabled:opacity-70 cursor-pointer"
+          <div className="flex items-center gap-3">
+            <a
+              href="/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-xl border border-blue-700 bg-white px-4 py-2 text-sm font-semibold text-blue-800 shadow-sm hover:bg-blue-50 transition"
             >
-              {isSavingSettings ? "Saving..." : "Save Hours"}
+              View Website
+            </a>
+            <button
+              onClick={() => signOut({ callbackUrl: "/auth/signin" })}
+              className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 transition"
+            >
+              Logout
             </button>
-            {settingsMessage && (
-              <span className="text-sm text-gray-600">{settingsMessage}</span>
-            )}
           </div>
-        </form>
-      </section>
+        </header>
 
-      <div className="grid lg:grid-cols-3 gap-6">
-        {/* Left: Add / Edit form */}
-        <div className="lg:col-span-1 bg-white border rounded-lg shadow-sm p-6">
-          <h2 className="text-lg font-semibold mb-4">{editingFood ? "Edit Item" : "Add New Item"}</h2>
-          <form onSubmit={handleAddFood} className="space-y-3">
+        <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-lg font-semibold text-slate-900">Business Hours and DoorDash</h2>
+          <p className="mt-1 text-sm text-slate-600">
+            These values appear on the homepage.
+          </p>
+
+          <form onSubmit={handleSaveSiteSettings} className="mt-4 grid gap-4 md:grid-cols-3">
             <div>
-              <label className="block text-sm text-gray-600">Name</label>
+              <label className="block text-sm font-medium text-slate-700">Open Date(s)</label>
               <input
-                placeholder="Name"
-                value={newFood.name}
-                onChange={(e) => setNewFood({ ...newFood, name: e.target.value })}
-                className="mt-1 w-full border rounded px-3 py-2"
+                value={siteSettings.openDate}
+                onChange={(e) =>
+                  setSiteSettings((prev) => ({ ...prev, openDate: e.target.value }))
+                }
+                placeholder="Friday - Sunday"
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-200"
                 required
               />
             </div>
 
             <div>
-              <label className="block text-sm text-gray-600">Price</label>
+              <label className="block text-sm font-medium text-slate-700">Open Time(s)</label>
               <input
-                placeholder="Price"
-                type="number"
-                step="0.01"
-                value={newFood.price}
-                onChange={(e) => setNewFood({ ...newFood, price: e.target.value })}
-                className="mt-1 w-full border rounded px-3 py-2"
+                value={siteSettings.openHours}
+                onChange={(e) =>
+                  setSiteSettings((prev) => ({ ...prev, openHours: e.target.value }))
+                }
+                placeholder="11:00 AM - 8:00 PM"
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-200"
                 required
               />
             </div>
 
             <div>
-              <label className="block text-sm text-gray-600 mb-1">Upload Image</label>
-
-              {/* hidden file input */}
+              <label className="block text-sm font-medium text-slate-700">DoorDash URL</label>
               <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    setSelectedFileName(file.name);
-                    handleImageUpload(file);
-                  }
-                }}
-                className="hidden"
-                aria-hidden
-              />
-
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex items-center gap-2 bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded cursor-pointer"
-                >
-                  Choose File
-                </button>
-                <span className="text-sm text-gray-600">{selectedFileName || "No file chosen"}</span>
-              </div>
-
-              {newFood.imageUrl && (
-                <div className="mt-2 relative w-32 h-20">
-                  <Image
-                    src={newFood.imageUrl}
-                    alt="preview"
-                    fill
-                    className="object-cover rounded shadow-sm"
-                  />
-                </div>
-              )}
-            </div>
-
-
-            <div>
-              <label className="block text-sm text-gray-600">Description</label>
-              <textarea
-                placeholder="Short description"
-                value={newFood.description}
-                onChange={(e) => setNewFood({ ...newFood, description: e.target.value })}
-                className="mt-1 w-full border rounded px-3 py-2"
+                type="url"
+                value={siteSettings.doorDashUrl}
+                onChange={(e) =>
+                  setSiteSettings((prev) => ({ ...prev, doorDashUrl: e.target.value }))
+                }
+                placeholder="https://www.doordash.com/"
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-200"
+                required
               />
             </div>
 
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={newFood.isOnTruck}
-                  onChange={(e) => setNewFood({ ...newFood, isOnTruck: e.target.checked })}
-                />
-                <span>Available on Truck</span>
-              </label>
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={newFood.isForCatering}
-                  onChange={(e) => setNewFood({ ...newFood, isForCatering: e.target.checked })}
-                />
-                <span>For Catering</span>
-              </label>
-            </div>
-
-            <div className="flex gap-2">
-              <button type="submit" className="flex-1 bg-rose-600 text-white py-2 rounded hover:bg-rose-700 cursor-pointer">Add Item</button>
+            <div className="md:col-span-3 flex items-center gap-3">
               <button
-                type="button"
-                onClick={() => {
-                  setNewFood({ name: "", price: "", description: "", isOnTruck: false, isForCatering: false, imageUrl: "" });
-                  setEditingFood(null);
-                }}
-                className="px-4 py-2 border rounded text-sm cursor-pointer"
+                type="submit"
+                disabled={isSavingSettings}
+                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition disabled:opacity-70"
               >
-                Reset
+                {isSavingSettings ? "Saving..." : "Save Hours"}
               </button>
+              {settingsMessage && <span className="text-sm text-slate-600">{settingsMessage}</span>}
             </div>
           </form>
-        </div>
+        </section>
 
-        {/* Right: List */}
-        <div className="lg:col-span-2">
-          <div className="flex items-center justify-between mb-4">
-            <input
-              placeholder="Search menu..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="w-full sm:w-80 border rounded px-3 py-2"
-            />
-            <div className="ml-4 text-sm text-gray-600">{filteredFoods.length} items</div>
-          </div>
+        <div className="grid gap-6 lg:grid-cols-3">
+          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:col-span-1">
+            <h2 className="mb-4 text-lg font-semibold text-slate-900">
+              {editingFoodId ? "Edit Item" : "Add New Item"}
+            </h2>
 
-          <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
-            <table className="min-w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left">Item</th>
-                  <th className="px-4 py-3">Price</th>
-                  <th className="px-4 py-3">On Truck</th>
-                  <th className="px-4 py-3">Catering</th>
-                  <th className="px-4 py-3">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredFoods.length === 0 ? (
+            <form onSubmit={handleSaveFood} className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-slate-700">Name</label>
+                <input
+                  placeholder="Name"
+                  value={foodForm.name}
+                  onChange={(e) =>
+                    setFoodForm((prev) => ({ ...prev, name: e.target.value }))
+                  }
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-200"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700">Price</label>
+                <input
+                  placeholder="Price"
+                  type="number"
+                  step="0.01"
+                  value={foodForm.price}
+                  onChange={(e) =>
+                    setFoodForm((prev) => ({ ...prev, price: e.target.value }))
+                  }
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-200"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  Upload Image
+                </label>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      setSelectedFileName(file.name);
+                      handleImageUpload(file);
+                    }
+                  }}
+                  className="hidden"
+                  aria-hidden
+                />
+
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 transition"
+                  >
+                    Choose File
+                  </button>
+                  <span className="text-sm text-slate-600">
+                    {selectedFileName || "No file chosen"}
+                  </span>
+                </div>
+
+                {foodForm.imageUrl && (
+                  <div className="mt-2 relative h-20 w-32 overflow-hidden rounded">
+                    <Image
+                      src={foodForm.imageUrl}
+                      alt="preview"
+                      fill
+                      className="object-cover"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700">Description</label>
+                <textarea
+                  placeholder="Short description"
+                  value={foodForm.description}
+                  onChange={(e) =>
+                    setFoodForm((prev) => ({ ...prev, description: e.target.value }))
+                  }
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              </div>
+
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={foodForm.isOnTruck}
+                    onChange={(e) =>
+                      setFoodForm((prev) => ({ ...prev, isOnTruck: e.target.checked }))
+                    }
+                  />
+                  <span>Available on Truck</span>
+                </label>
+
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={foodForm.isForCatering}
+                    onChange={(e) =>
+                      setFoodForm((prev) => ({ ...prev, isForCatering: e.target.checked }))
+                    }
+                  />
+                  <span>For Catering</span>
+                </label>
+              </div>
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="submit"
+                  disabled={isSavingFood}
+                  className="flex-1 rounded-xl bg-rose-600 py-2 text-sm font-semibold text-white hover:bg-rose-700 transition disabled:opacity-70"
+                >
+                  {isSavingFood
+                    ? "Saving..."
+                    : editingFoodId
+                    ? "Update Item"
+                    : "Add Item"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetFoodForm();
+                    setFoodMessage("");
+                  }}
+                  className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition"
+                >
+                  {editingFoodId ? "Cancel Edit" : "Reset"}
+                </button>
+              </div>
+
+              {foodMessage && <p className="text-sm text-slate-600">{foodMessage}</p>}
+            </form>
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:col-span-2">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <input
+                placeholder="Search menu..."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="w-full sm:w-80 rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-200"
+              />
+              <div className="text-sm text-slate-600">
+                {filteredFoods.length} items
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="min-w-full text-sm">
+                <thead className="bg-slate-50">
                   <tr>
-                    <td colSpan={5} className="text-center py-6 text-gray-500">No items found.</td>
+                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Item</th>
+                    <th className="px-4 py-3 font-semibold text-slate-700">Price</th>
+                    <th className="px-4 py-3 font-semibold text-slate-700">On Truck</th>
+                    <th className="px-4 py-3 font-semibold text-slate-700">Catering</th>
+                    <th className="px-4 py-3 text-right font-semibold text-slate-700">Actions</th>
                   </tr>
-                ) : (
-                  filteredFoods.map((food, idx) => (
-                    <tr key={food.id} className={"border-t " + (idx % 2 === 0 ? "bg-white" : "bg-gray-50")}>
-                      <td className="px-4 py-3 flex items-center gap-4">
-                        <div className="w-16 h-16 bg-gray-100 rounded overflow-hidden flex items-center justify-center">
-                          {food.imageUrl ? (
-                            <div className="relative w-full h-full">
-                              <Image
-                                src={food.imageUrl}
-                                alt={food.name}
-                                fill
-                                className="object-cover"
-                              />
-                            </div>
-                          ) : (
-                            <svg className="w-8 h-8 text-gray-300" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                              <path d="M8 14s1.5-2 4-2 4 2 4 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                          )}
-                        </div>
-                        <div>
-                          <div className="font-medium">{food.name}</div>
-                          <div className="text-xs text-gray-500">{food.description ?? "—"}</div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-rose-600 font-semibold">${food.price.toFixed(2)}</td>
-                      <td className="px-4 py-3 text-center">{food.isOnTruck ? "✅" : "—"}</td>
-                      <td className="px-4 py-3 text-center">{food.isForCatering ? "✅" : "—"}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex gap-2 justify-end">
-                          <button
-                            onClick={() => setEditingFood(food)}
-                            className="flex items-center gap-2 bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600"
-                          >
-                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                              <path d="M4 20h4l10-10-4-4L4 16v4z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                              <path d="M14 6l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => handleDelete(food.id)}
-                            className="flex items-center gap-2 bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600"
-                          >
-                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                              <path d="M3 6h18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                              <path d="M8 6v12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                              <path d="M10 11v6M14 11v6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                            Delete
-                          </button>
-                        </div>
+                </thead>
+                <tbody>
+                  {filteredFoods.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-6 text-center text-slate-500">
+                        No items found.
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  ) : (
+                    filteredFoods.map((food, idx) => (
+                      <tr
+                        key={food.id}
+                        className={`border-t ${
+                          idx % 2 === 0 ? "bg-white" : "bg-slate-50/70"
+                        }`}
+                      >
+                        <td className="px-4 py-3">
+                          <div className="flex min-w-[260px] items-center gap-3">
+                            <div className="relative h-14 w-14 overflow-hidden rounded bg-slate-100">
+                              {food.imageUrl ? (
+                                <Image
+                                  src={food.imageUrl}
+                                  alt={food.name}
+                                  fill
+                                  className="object-cover"
+                                />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">
+                                  No Image
+                                </div>
+                              )}
+                            </div>
+                            <div>
+                              <div className="font-semibold text-slate-900">{food.name}</div>
+                              <div className="text-xs text-slate-500">
+                                {food.description || "-"}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-3 text-center font-semibold text-rose-700">
+                          ${food.price.toFixed(2)}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {food.isOnTruck ? "Yes" : "No"}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {food.isForCatering ? "Yes" : "No"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end gap-2">
+                            <button
+                              onClick={() => startEditingFood(food)}
+                              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleDelete(food.id)}
+                              className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 transition"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
         </div>
       </div>
     </div>
