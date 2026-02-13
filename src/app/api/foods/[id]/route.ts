@@ -2,6 +2,13 @@ export const runtime = "nodejs";
 import { prisma } from "../../../../../lib/prisma";
 import { auth } from "../../../../../auth";
 import { NextResponse } from "next/server";
+import {
+  deriveFoodCategories,
+  type FoodCategory,
+  getLegacyAvailabilityFromCategories,
+  getPrimaryFoodCategory,
+  normalizeFoodCategories,
+} from "@/lib/foodCategory";
 
 // DELETE a food item
 export async function DELETE(_: Request, context: { params: Promise<{ id: string }> }) {
@@ -30,7 +37,7 @@ export async function PUT(req: Request, context: { params: Promise<{ id: string 
 
     const { id } = await context.params;
     const data = await req.json();
-    const { name, price, description, isOnTruck, isForCatering, imageUrl } = data;
+    const { name, price, description, imageUrl } = data;
     const cleanedName = String(name ?? "").trim();
 
     const parsedPrice = Number(price);
@@ -41,14 +48,35 @@ export async function PUT(req: Request, context: { params: Promise<{ id: string 
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
     }
 
+    const cleanedDescription = description ? String(description) : null;
+    const requestedCategories = normalizeFoodCategories(data?.categories);
+    const categories = requestedCategories.length
+      ? requestedCategories
+      : deriveFoodCategories({
+        name: cleanedName,
+        description: cleanedDescription,
+        categories: data?.categories,
+        isOnTruck: Boolean(data?.isOnTruck),
+        isForCatering: Boolean(data?.isForCatering),
+      });
+    const normalizedCategories: FoodCategory[] = categories.length
+      ? categories
+      : ["MAIN_DISHES"];
+    const category = getPrimaryFoodCategory(normalizedCategories);
+    const { isOnTruck, isForCatering } = getLegacyAvailabilityFromCategories(
+      normalizedCategories
+    );
+
     const updated = await prisma.food.update({
       where: { id },
       data: {
         name: cleanedName,
         price: parsedPrice,
-        description: description ? String(description) : null,
-        isOnTruck: Boolean(isOnTruck),
-        isForCatering: Boolean(isForCatering),
+        description: cleanedDescription,
+        category,
+        categories: normalizedCategories,
+        isOnTruck,
+        isForCatering,
         imageUrl: imageUrl ? String(imageUrl) : null,
       },
     });

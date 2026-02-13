@@ -14,12 +14,22 @@ datasource db {
   url  	    = env("DATABASE_URL")
 }
 
+enum FoodCategory {
+  MAIN_DISHES
+  SIDES
+  DESSERTS
+  AVAILABLE_FOR_CATERING
+  OTHER_ITEMS
+}
+
 model Food {
   // Basic Fields
   id String @id @default(cuid())
   name String
   price Float
   description String?
+  category FoodCategory @default(MAIN_DISHES)
+  categories FoodCategory[] @default([MAIN_DISHES])
 
   // Available on truck or for catering
   isOnTruck Boolean @default(false)

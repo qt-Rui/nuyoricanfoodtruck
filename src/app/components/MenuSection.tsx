@@ -2,12 +2,15 @@
 
 import { useMemo, useState } from "react";
 import Image from "next/image";
+import { deriveFoodCategories, type FoodCategory } from "@/lib/foodCategory";
 
 interface Food {
   id: string;
   name: string;
   price: number;
   description: string | null;
+  categories?: FoodCategory[] | null;
+  category?: FoodCategory | null;
   isOnTruck: boolean;
   isForCatering: boolean;
   imageUrl?: string | null;
@@ -53,7 +56,7 @@ const escapeXml = (value: string) =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&apos;");
 
-function FoodCard({ food }: { food: Food }) {
+function FoodCard({ food, showPrice = true }: { food: Food; showPrice?: boolean }) {
   const fallback = buildFallbackImage(food.name);
   const [src, setSrc] = useState(food.imageUrl?.trim() ? food.imageUrl : fallback);
 
@@ -75,9 +78,11 @@ function FoodCard({ food }: { food: Food }) {
           }}
         />
 
-        <div className="absolute right-3 top-3 rounded-full bg-blue-900/90 px-3 py-1 text-sm font-extrabold text-white shadow-sm ring-1 ring-white/30">
-          ${food.price.toFixed(2)}
-        </div>
+        {showPrice && (
+          <div className="absolute right-3 top-3 rounded-full bg-blue-900/90 px-3 py-1 text-sm font-extrabold text-white shadow-sm ring-1 ring-white/30">
+            ${food.price.toFixed(2)}
+          </div>
+        )}
       </div>
 
       <div className="p-5">
@@ -87,27 +92,6 @@ function FoodCard({ food }: { food: Food }) {
         <p className="mt-1 min-h-10 text-sm text-slate-600">
           {food.description || "No description yet."}
         </p>
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          <span
-            className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
-              food.isOnTruck
-                ? "border border-red-200 bg-red-50 text-red-900"
-                : "border border-slate-200 bg-white text-slate-700"
-            }`}
-          >
-            {food.isOnTruck ? "On Truck" : "Not on Truck"}
-          </span>
-          <span
-            className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
-              food.isForCatering
-                ? "border border-blue-200 bg-blue-50 text-blue-900"
-                : "border border-slate-200 bg-white text-slate-700"
-            }`}
-          >
-            {food.isForCatering ? "Catering" : "No Catering"}
-          </span>
-        </div>
       </div>
     </article>
   );
@@ -141,29 +125,42 @@ export default function MenuSection({ foods }: { foods: Food[] }) {
   const [query, setQuery] = useState("");
   const normalizedQuery = query.trim().toLowerCase();
 
-  const { todaysMenu, cateringMenu, otherItems, totalShown } = useMemo(() => {
+  const { groupedFoods, totalShown } = useMemo(() => {
     const matchesQuery = (food: Food) =>
       `${food.name} ${food.description ?? ""}`
         .toLowerCase()
         .includes(normalizedQuery);
 
-    const todaysMenu = foods.filter((food) => food.isOnTruck && matchesQuery(food));
-    const cateringMenu = foods.filter(
-      (food) => !food.isOnTruck && food.isForCatering && matchesQuery(food)
-    );
-    const otherItems = foods.filter(
-      (food) => !food.isOnTruck && !food.isForCatering && matchesQuery(food)
-    );
+    const groupedFoods: Record<FoodCategory, Food[]> = {
+      MAIN_DISHES: [],
+      SIDES: [],
+      DESSERTS: [],
+      AVAILABLE_FOR_CATERING: [],
+      OTHER_ITEMS: [],
+    };
+
+    let shownCount = 0;
+    for (const food of foods) {
+      if (!matchesQuery(food)) continue;
+      shownCount += 1;
+
+      const categories = deriveFoodCategories(food);
+      for (const category of categories) {
+        groupedFoods[category].push(food);
+      }
+    }
 
     return {
-      todaysMenu,
-      cateringMenu,
-      otherItems,
-      totalShown: todaysMenu.length + cateringMenu.length + otherItems.length,
+      groupedFoods,
+      totalShown: shownCount,
     };
   }, [foods, normalizedQuery]);
 
-  const renderGrid = (items: Food[], label: string) => {
+  const renderGrid = (
+    items: Food[],
+    label: string,
+    options?: { showPrice?: boolean }
+  ) => {
     if (!items.length) {
       return <EmptyState label={label} />;
     }
@@ -171,7 +168,11 @@ export default function MenuSection({ foods }: { foods: Food[] }) {
     return (
       <div className="grid grid-cols-1 gap-7 sm:grid-cols-2 lg:grid-cols-3">
         {items.map((food) => (
-          <FoodCard key={food.id} food={food} />
+          <FoodCard
+            key={food.id}
+            food={food}
+            showPrice={options?.showPrice ?? true}
+          />
         ))}
       </div>
     );
@@ -207,7 +208,24 @@ export default function MenuSection({ foods }: { foods: Food[] }) {
             title="Today's Menu"
             subtitle="Available now while supplies last."
           />
-          {renderGrid(todaysMenu, "Today's Menu")}
+          <div className="space-y-10">
+            {groupedFoods.MAIN_DISHES.length > 0 && (
+              <div>
+                <h3 className="mb-4 text-xl font-bold text-slate-900">Main Dishes</h3>
+                {renderGrid(groupedFoods.MAIN_DISHES, "Main Dishes")}
+              </div>
+            )}
+
+            <div>
+              <h3 className="mb-4 text-xl font-bold text-slate-900">Sides</h3>
+              {renderGrid(groupedFoods.SIDES, "Sides")}
+            </div>
+
+            <div>
+              <h3 className="mb-4 text-xl font-bold text-slate-900">Desserts</h3>
+              {renderGrid(groupedFoods.DESSERTS, "Desserts")}
+            </div>
+          </div>
         </div>
 
         <div>
@@ -215,15 +233,17 @@ export default function MenuSection({ foods }: { foods: Food[] }) {
             title="Available for Catering"
             subtitle="Great for parties, events, and office lunches."
           />
-          {renderGrid(cateringMenu, "Available for Catering")}
+          {renderGrid(groupedFoods.AVAILABLE_FOR_CATERING, "Available for Catering", {
+            showPrice: false,
+          })}
         </div>
 
         <div>
           <SectionHeader
             title="Other Items"
-            subtitle="Not on today's truck menu and not listed for catering."
+            subtitle="Not listed in today's menu or catering menu."
           />
-          {renderGrid(otherItems, "Other Items")}
+          {renderGrid(groupedFoods.OTHER_ITEMS, "Other Items")}
         </div>
       </section>
     </>

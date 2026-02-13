@@ -6,12 +6,22 @@ import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { signOut, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import {
+  deriveFoodCategories,
+  FOOD_CATEGORIES,
+  FOOD_CATEGORY_LABELS,
+  getLegacyAvailabilityFromCategories,
+  getPrimaryFoodCategory,
+  type FoodCategory,
+} from "@/lib/foodCategory";
 
 interface Food {
   id: string;
   name: string;
   price: number;
   description: string | null;
+  categories?: FoodCategory[] | null;
+  category?: FoodCategory | null;
   isOnTruck: boolean;
   isForCatering: boolean;
   imageUrl: string | null;
@@ -21,8 +31,7 @@ interface FoodForm {
   name: string;
   price: string;
   description: string;
-  isOnTruck: boolean;
-  isForCatering: boolean;
+  categories: FoodCategory[];
   imageUrl: string;
 }
 
@@ -36,10 +45,11 @@ const emptyFoodForm: FoodForm = {
   name: "",
   price: "",
   description: "",
-  isOnTruck: false,
-  isForCatering: false,
+  categories: ["MAIN_DISHES"],
   imageUrl: "",
 };
+
+type FoodListFilter = "ALL" | FoodCategory;
 
 export default function AdminPage() {
   const [foods, setFoods] = useState<Food[]>([]);
@@ -56,6 +66,7 @@ export default function AdminPage() {
   const [foodMessage, setFoodMessage] = useState("");
   const [settingsMessage, setSettingsMessage] = useState("");
   const [query, setQuery] = useState("");
+  const [foodListFilter, setFoodListFilter] = useState<FoodListFilter>("ALL");
   const [selectedFileName, setSelectedFileName] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { data: session, status } = useSession();
@@ -117,8 +128,7 @@ export default function AdminPage() {
       name: food.name,
       price: String(food.price),
       description: food.description ?? "",
-      isOnTruck: food.isOnTruck,
-      isForCatering: food.isForCatering,
+      categories: deriveFoodCategories(food),
       imageUrl: food.imageUrl ?? "",
     });
     setSelectedFileName("");
@@ -139,6 +149,10 @@ export default function AdminPage() {
       setFoodMessage("Please enter a valid price.");
       return;
     }
+    if (!foodForm.categories.length) {
+      setFoodMessage("Select at least one category.");
+      return;
+    }
 
     setIsSavingFood(true);
 
@@ -147,14 +161,22 @@ export default function AdminPage() {
         ? `/api/foods/${editingFoodId}`
         : "/api/foods";
       const method = editingFoodId ? "PUT" : "POST";
+      const normalizedCategories = [...foodForm.categories];
+      const category = getPrimaryFoodCategory(normalizedCategories);
+      const { isOnTruck, isForCatering } = getLegacyAvailabilityFromCategories(
+        normalizedCategories
+      );
 
       const res = await fetch(endpoint, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...foodForm,
           name: foodForm.name.trim(),
           price: parsedPrice,
+          category,
+          categories: normalizedCategories,
+          isOnTruck,
+          isForCatering,
           description: foodForm.description.trim() || null,
           imageUrl: foodForm.imageUrl.trim() || null,
         }),
@@ -252,11 +274,26 @@ export default function AdminPage() {
     }
   };
 
-  const filteredFoods = foods.filter((food) =>
-    `${food.name} ${food.description ?? ""}`
+  const toggleFoodFormCategory = (category: FoodCategory) => {
+    setFoodForm((prev) => {
+      const hasCategory = prev.categories.includes(category);
+      const nextCategories = hasCategory
+        ? prev.categories.filter((item) => item !== category)
+        : [...prev.categories, category];
+
+      return { ...prev, categories: nextCategories };
+    });
+  };
+
+  const filteredFoods = foods.filter((food) => {
+    const matchesSearch = `${food.name} ${food.description ?? ""}`
       .toLowerCase()
-      .includes(query.trim().toLowerCase())
-  );
+      .includes(query.trim().toLowerCase());
+    if (!matchesSearch) return false;
+
+    if (foodListFilter === "ALL") return true;
+    return deriveFoodCategories(food).includes(foodListFilter);
+  });
 
   if (status === "loading" || isLoading) {
     return <div className="p-8 text-center text-gray-600">Loading...</div>;
@@ -271,7 +308,7 @@ export default function AdminPage() {
           <div>
             <h1 className="text-3xl font-extrabold text-slate-900">Admin Dashboard</h1>
             <p className="text-sm text-slate-600">
-              Manage menu items, hours, and links shown on the website.
+              Manage menu items, categories, hours, and links shown on the website.
             </p>
           </div>
 
@@ -444,28 +481,25 @@ export default function AdminPage() {
                 />
               </div>
 
-              <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={foodForm.isOnTruck}
-                    onChange={(e) =>
-                      setFoodForm((prev) => ({ ...prev, isOnTruck: e.target.checked }))
-                    }
-                  />
-                  <span>Available on Truck</span>
+              <div>
+                <label className="block text-sm font-medium text-slate-700">
+                  Menu Categories
                 </label>
-
-                <label className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={foodForm.isForCatering}
-                    onChange={(e) =>
-                      setFoodForm((prev) => ({ ...prev, isForCatering: e.target.checked }))
-                    }
-                  />
-                  <span>For Catering</span>
-                </label>
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {FOOD_CATEGORIES.map((category) => (
+                    <label
+                      key={category}
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={foodForm.categories.includes(category)}
+                        onChange={() => toggleFoodFormCategory(category)}
+                      />
+                      <span>{FOOD_CATEGORY_LABELS[category]}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
 
               <div className="flex gap-2 pt-1">
@@ -510,21 +544,48 @@ export default function AdminPage() {
               </div>
             </div>
 
+            <div className="mb-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setFoodListFilter("ALL")}
+                className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                  foodListFilter === "ALL"
+                    ? "border-blue-300 bg-blue-50 text-blue-900"
+                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                All
+              </button>
+              {FOOD_CATEGORIES.map((category) => (
+                <button
+                  key={category}
+                  type="button"
+                  onClick={() => setFoodListFilter(category)}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                    foodListFilter === category
+                      ? "border-blue-300 bg-blue-50 text-blue-900"
+                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  {FOOD_CATEGORY_LABELS[category]}
+                </button>
+              ))}
+            </div>
+
             <div className="overflow-x-auto rounded-xl border border-slate-200">
               <table className="min-w-full text-sm">
                 <thead className="bg-slate-50">
                   <tr>
                     <th className="px-4 py-3 text-left font-semibold text-slate-700">Item</th>
                     <th className="px-4 py-3 font-semibold text-slate-700">Price</th>
-                    <th className="px-4 py-3 font-semibold text-slate-700">On Truck</th>
-                    <th className="px-4 py-3 font-semibold text-slate-700">Catering</th>
+                    <th className="px-4 py-3 font-semibold text-slate-700">Categories</th>
                     <th className="px-4 py-3 text-right font-semibold text-slate-700">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredFoods.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="py-6 text-center text-slate-500">
+                      <td colSpan={4} className="py-6 text-center text-slate-500">
                         No items found.
                       </td>
                     </tr>
@@ -565,10 +626,16 @@ export default function AdminPage() {
                           ${food.price.toFixed(2)}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          {food.isOnTruck ? "Yes" : "No"}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          {food.isForCatering ? "Yes" : "No"}
+                          <div className="flex flex-wrap justify-center gap-1.5">
+                            {deriveFoodCategories(food).map((category) => (
+                              <span
+                                key={`${food.id}-${category}`}
+                                className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-xs font-semibold text-slate-700"
+                              >
+                                {FOOD_CATEGORY_LABELS[category]}
+                              </span>
+                            ))}
+                          </div>
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex justify-end gap-2">
