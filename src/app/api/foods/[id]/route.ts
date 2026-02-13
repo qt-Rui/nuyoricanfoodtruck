@@ -6,7 +6,6 @@ import {
   deriveFoodCategories,
   type FoodCategory,
   getLegacyAvailabilityFromCategories,
-  getPrimaryFoodCategory,
   normalizeFoodCategories,
 } from "@/lib/foodCategory";
 
@@ -62,7 +61,6 @@ export async function PUT(req: Request, context: { params: Promise<{ id: string 
     const normalizedCategories: FoodCategory[] = categories.length
       ? categories
       : ["MAIN_DISHES"];
-    const category = getPrimaryFoodCategory(normalizedCategories);
     const { isOnTruck, isForCatering } = getLegacyAvailabilityFromCategories(
       normalizedCategories
     );
@@ -73,7 +71,6 @@ export async function PUT(req: Request, context: { params: Promise<{ id: string 
         name: cleanedName,
         price: parsedPrice,
         description: cleanedDescription,
-        category,
         categories: normalizedCategories,
         isOnTruck,
         isForCatering,

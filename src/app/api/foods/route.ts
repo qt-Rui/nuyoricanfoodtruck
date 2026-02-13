@@ -6,7 +6,6 @@ import {
   deriveFoodCategories,
   type FoodCategory,
   getLegacyAvailabilityFromCategories,
-  getPrimaryFoodCategory,
   normalizeFoodCategories,
 } from "@/lib/foodCategory";
 
@@ -46,7 +45,6 @@ export async function POST(req: Request) {
   const normalizedCategories: FoodCategory[] = categories.length
     ? categories
     : ["MAIN_DISHES"];
-  const category = getPrimaryFoodCategory(normalizedCategories);
   const { isOnTruck, isForCatering } = getLegacyAvailabilityFromCategories(
     normalizedCategories
   );
@@ -56,7 +54,6 @@ export async function POST(req: Request) {
       name,
       price,
       description,
-      category,
       categories: normalizedCategories,
       isOnTruck,
       isForCatering,
